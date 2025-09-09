@@ -6,8 +6,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     git ca-certificates curl python3 build-essential \
  && rm -rf /var/lib/apt/lists/*
 
-# 安装 Meteor（允许 root）
-RUN curl https://install.meteor.com/ | sed s/--progress-bar/-sL/g | sh
+# 安装 Meteor（允许 root，增加重试机制）
+RUN for i in 1 2 3; do \
+        curl -fsSL https://install.meteor.com/ | sed s/--progress-bar/-sL/g | sh && break || \
+        (echo "Meteor install attempt $i failed, retrying..." && sleep 5); \
+    done
 ENV PATH="/root/.meteor:${PATH}"
 
 WORKDIR /src
@@ -15,7 +18,11 @@ WORKDIR /src
 # 先装依赖（利用缓存）
 COPY package.json yarn.lock ./
 COPY packages ./packages
-RUN corepack enable && yarn install --frozen-lockfile
+# 设置yarn配置并安装依赖
+RUN corepack enable && \
+    yarn config set network-timeout 300000 && \
+    yarn config set registry https://registry.npmjs.org/ && \
+    yarn install --frozen-lockfile --network-timeout 300000
 
 # 拷贝剩余源码
 COPY . .
