@@ -6,7 +6,11 @@ LABEL maintainer="buildmaster@rocket.chat"
 ENV LANG=C.UTF-8
 
 # Install build dependencies
-RUN apk add --no-cache deno ttf-dejavu python3 make g++ py3-setuptools libc6-compat
+RUN apk add --no-cache deno ttf-dejavu python3 make g++ py3-setuptools libc6-compat curl
+
+# Install Meteor
+RUN curl https://install.meteor.com/ | sh
+ENV PATH="$PATH:/root/.meteor"
 
 # Copy source code
 COPY . /app
@@ -79,8 +83,8 @@ RUN apk del deps
 USER rocketchat
 
 # TODO: remove hack once upstream builds are fixed
-# Note: matrix-sdk-crypto.linux-x64-musl.node file not available in current build context
-# These COPY commands are temporarily disabled until the file is available
+COPY --chown=rocketchat:rocketchat matrix-sdk-crypto.linux-x64-musl.node /app/bundle/programs/server/npm/node_modules/@matrix-org/matrix-sdk-crypto-nodejs
+COPY --chown=rocketchat:rocketchat matrix-sdk-crypto.linux-x64-musl.node /app/bundle/programs/server/npm/node_modules/@vector-im/matrix-bot-sdk/node_modules/@matrix-org/matrix-sdk-crypto-nodejs
 
 VOLUME /app/uploads
 
