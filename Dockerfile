@@ -1,58 +1,17 @@
-# Multi-stage Dockerfile for Rocket.Chat Custom Build
-# Stage 1: Build stage
-FROM node:22.16.0-alpine AS builder
+FROM node:22.16.0-alpine3.20
 
-LABEL maintainer="admin888@example.com"
+LABEL maintainer="buildmaster@rocket.chat"
 
 ENV LANG=C.UTF-8
 
-# Install build dependencies
-RUN apk add --no-cache \
-    python3 \
-    make \
-    g++ \
-    git \
-    libc6-compat
+# Install dependencies and create user
+RUN apk add --no-cache dumb-init ttf-dejavu \
+    && apk add --no-cache --virtual .build-deps shadow python3 make g++ py3-setuptools libc6-compat \
+    && addgroup -S rocketchat \
+    && adduser -S -G rocketchat rocketchat
 
-WORKDIR /app
-
-# Copy package files first for better caching
-COPY package.json yarn.lock .yarnrc.yml ./
-COPY .yarn/ .yarn/
-
-# Install dependencies
-RUN yarn install --immutable
-
-# Copy source code
-COPY . .
-
-# Build the application
-RUN yarn build
-
-# Build meteor application
-WORKDIR /app/apps/meteor
-RUN yarn build
-
-# Stage 2: Runtime stage
-FROM node:22.16.0-alpine
-
-LABEL maintainer="admin888@example.com"
-LABEL description="Rocket.Chat Custom Build with HT.Chat branding"
-
-ENV LANG=C.UTF-8
-
-# Install runtime dependencies
-RUN apk add --no-cache \
-    dumb-init \
-    fontconfig \
-    ttf-dejavu
-
-# Create rocketchat user
-RUN addgroup -S rocketchat && \
-    adduser -D -S -G rocketchat rocketchat
-
-# Copy built application from builder stage
-COPY --from=builder --chown=rocketchat:rocketchat /app/apps/meteor/.meteor/local/build /app/bundle
+# Copy application files
+COPY --chown=rocketchat:rocketchat . /app
 
 # Set environment variables
 ENV DEPLOY_METHOD=docker \
@@ -63,25 +22,45 @@ ENV DEPLOY_METHOD=docker \
     ROOT_URL=http://localhost:3000 \
     Accounts_AvatarStorePath=/app/uploads
 
+# Switch to rocketchat user for npm operations
 USER rocketchat
 
-# Install production dependencies
-RUN cd /app/bundle/programs/server && \
-    npm install --omit=dev && \
-    npm cache clean --force
+# Install and build dependencies
+RUN cd /app/bundle/programs/server \
+    && npm install --omit=dev \
+    && rm -rf npm/node_modules/sharp \
+    && npm install sharp@0.32.6 --no-save \
+    && mv node_modules/sharp npm/node_modules/sharp \
+    && cd /app/bundle/programs/server/npm/node_modules/@vector-im/matrix-bot-sdk \
+    && npm install \
+    && cd /app/bundle/programs/server/npm \
+    && npm rebuild bcrypt --build-from-source \
+    && npm cache clear --force
 
-# Create uploads directory
-RUN mkdir -p /app/uploads
+# Switch back to root to clean up build dependencies
+USER root
+RUN apk del .build-deps
 
-VOLUME ["/app/uploads"]
+# Switch back to rocketchat user
+USER rocketchat
 
+# Copy matrix SDK files (TODO: remove hack once upstream builds are fixed)
+COPY --chown=rocketchat:rocketchat matrix-sdk-crypto.linux-x64-musl.node /app/bundle/programs/server/npm/node_modules/@matrix-org/matrix-sdk-crypto-nodejs
+COPY --chown=rocketchat:rocketchat matrix-sdk-crypto.linux-x64-musl.node /app/bundle/programs/server/npm/node_modules/@vector-im/matrix-bot-sdk/node_modules/@matrix-org/matrix-sdk-crypto-nodejs
+
+# Create volume for uploads
+VOLUME /app/uploads
+
+# Set working directory
 WORKDIR /app/bundle
 
+# Expose port
 EXPOSE 3000
 
-# Health check
+# Add health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
-    CMD node -e "require('http').get('http://localhost:3000/api/info', (res) => process.exit(res.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))"
+    CMD wget --no-verbose --tries=1 --spider http://localhost:3000/api/info || exit 1
 
+# Use dumb-init to handle signals properly
 ENTRYPOINT ["dumb-init", "--"]
 CMD ["node", "main.js"]
