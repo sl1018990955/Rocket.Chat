@@ -16,11 +16,11 @@ ENV PATH="/root/.meteor:${PATH}"
 WORKDIR /src
 
 # 先装依赖（利用缓存）
-COPY package.json yarn.lock ./
+COPY package.json .yarnrc.yml ./
 COPY packages ./packages
 # 安装依赖（配置已在.yarnrc.yml中设置）
 RUN corepack enable && \
-    yarn install --frozen-lockfile
+    yarn install
 
 # 拷贝剩余源码
 COPY . .
