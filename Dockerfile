@@ -21,7 +21,6 @@ COPY packages ./packages
 # 设置yarn配置并安装依赖
 RUN corepack enable && \
     yarn config set httpTimeout 300000 && \
-    yarn config set networkTimeout 300000 && \
     yarn config set npmRegistryServer https://registry.npmjs.org/ && \
     yarn install --frozen-lockfile
 
