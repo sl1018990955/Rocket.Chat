@@ -49,7 +49,7 @@ RUN apk add --no-cache \
 
 # Create rocketchat user
 RUN addgroup -g 65533 -S rocketchat && \
-    adduser -u 65533 -S -G rocketchat rocketchat
+    adduser -u 65533 -D -S -G rocketchat rocketchat
 
 # Copy built application from builder stage
 COPY --from=builder --chown=rocketchat:rocketchat /app/apps/meteor/.meteor/local/build /app/bundle
