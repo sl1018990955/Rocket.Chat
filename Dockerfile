@@ -1,18 +1,49 @@
-FROM node:22.16.0-alpine3.20
+# Build stage
+FROM node:22-alpine AS builder
 
 LABEL maintainer="buildmaster@rocket.chat"
 
 ENV LANG=C.UTF-8
 
-# Install dependencies and create user (based on official Dockerfile.alpine)
+# Install build dependencies
+RUN apk add --no-cache deno ttf-dejavu python3 make g++ py3-setuptools libc6-compat
+
+# Copy source code
+COPY . /app
+WORKDIR /app
+
+# Install dependencies and build
+RUN yarn install
+RUN yarn build:ci
+
+# Runtime stage
+FROM node:22-alpine
+
+LABEL maintainer="buildmaster@rocket.chat"
+
+ENV LANG=C.UTF-8
+
+# `nogroup` group is historically reserved for NFS.
+# We don't use any NFS related tools in this image.
+# For the same reason of NFS using the gid, we can also use it as long as there are no conflicts in terms of running processes with the same egid (which is 1 in our case).
+# While 65533 raw gid could be used, renaming nogroup to rocketchat here for maximum compatibility with older debian image.
+# More info on nobody/nogroup - https://wiki.ubuntu.com/nobody
+# Debian wiki - https://wiki.debian.org/SystemGroups
+# """
+# daemon: Some unprivileged daemons that need to write to files on disk run as daemon.daemon (e.g., portmap, atd, probably others).
+# Daemons that don't need to own any files can run as nobody.nogroup instead,
+# and more complex or security conscious daemons run as dedicated users.
+# The daemon user is also handy for locally installed daemons.
+# """
 RUN apk add --no-cache deno ttf-dejavu \
     && apk add --no-cache --virtual deps shadow python3 make g++ py3-setuptools libc6-compat \
     && groupmod -n rocketchat nogroup \
     && useradd -u 65533 -r -g rocketchat rocketchat
 
-COPY --chown=rocketchat:rocketchat . /app
+# Copy built application from builder stage
+COPY --from=builder --chown=rocketchat:rocketchat /tmp/dist/bundle /app/bundle
 
-# Set environment variables
+# needs a mongo instance - defaults to container linking with alias 'mongo'
 ENV DEPLOY_METHOD=docker \
     NODE_ENV=production \
     MONGO_URL=mongodb://mongo:27017/rocketchat \
@@ -23,15 +54,20 @@ ENV DEPLOY_METHOD=docker \
 
 USER rocketchat
 
-# Install dependencies (based on official configuration)
 RUN cd /app/bundle/programs/server \
     && npm install --omit=dev \
     && cd /app/bundle/programs/server \
     && rm -rf npm/node_modules/sharp \
     && npm install sharp@0.32.6 --no-save \
     && mv node_modules/sharp npm/node_modules/sharp \
+    # End hack for sharp
     && cd /app/bundle/programs/server/npm/node_modules/@vector-im/matrix-bot-sdk \
     && npm install \
+    # # Start hack for isolated-vm...
+    # && rm -rf npm/node_modules/isolated-vm \
+    # && npm install isolated-vm@4.6.0 \
+    # && mv node_modules/isolated-vm npm/node_modules/isolated-vm \
+    # # End hack for isolated-vm
     && cd /app/bundle/programs/server/npm \
     && npm rebuild bcrypt --build-from-source \
     && npm cache clear --force
@@ -41,6 +77,10 @@ USER root
 RUN apk del deps
 
 USER rocketchat
+
+# TODO: remove hack once upstream builds are fixed
+COPY --chown=rocketchat:rocketchat matrix-sdk-crypto.linux-x64-musl.node /app/bundle/programs/server/npm/node_modules/@matrix-org/matrix-sdk-crypto-nodejs
+COPY --chown=rocketchat:rocketchat matrix-sdk-crypto.linux-x64-musl.node /app/bundle/programs/server/npm/node_modules/@vector-im/matrix-bot-sdk/node_modules/@matrix-org/matrix-sdk-crypto-nodejs
 
 VOLUME /app/uploads
 
