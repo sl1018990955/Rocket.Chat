@@ -4,7 +4,12 @@ FROM node:22-bullseye AS builder
 ENV LANG=C.UTF-8
 RUN apt-get update && apt-get install -y --no-install-recommends \
     git ca-certificates curl python3 build-essential \
+    pkg-config libssl-dev \
  && rm -rf /var/lib/apt/lists/*
+
+# Install Rust for native modules like @napi-rs/pinyin
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+ENV PATH="/root/.cargo/bin:${PATH}"
 
 # 安装 Meteor（允许 root，增加重试机制）
 RUN for i in 1 2 3; do \
