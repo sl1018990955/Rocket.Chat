@@ -20,6 +20,7 @@ COPY package.json .yarnrc.yml ./
 COPY .yarn ./.yarn
 COPY packages ./packages
 COPY ee ./ee
+COPY apps ./apps
 # 安装依赖（配置已在.yarnrc.yml中设置）
 RUN corepack enable && \
     yarn install
