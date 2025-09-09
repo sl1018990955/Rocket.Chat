@@ -17,6 +17,7 @@ WORKDIR /src
 
 # 先装依赖（利用缓存）
 COPY package.json .yarnrc.yml ./
+COPY .yarn ./.yarn
 COPY packages ./packages
 # 安装依赖（配置已在.yarnrc.yml中设置）
 RUN corepack enable && \
