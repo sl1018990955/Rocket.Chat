@@ -18,10 +18,8 @@ WORKDIR /src
 # 先装依赖（利用缓存）
 COPY package.json yarn.lock ./
 COPY packages ./packages
-# 设置yarn配置并安装依赖
+# 安装依赖（配置已在.yarnrc.yml中设置）
 RUN corepack enable && \
-    yarn config set httpTimeout 300000 && \
-    yarn config set npmRegistryServer https://registry.npmjs.org/ && \
     yarn install --frozen-lockfile
 
 # 拷贝剩余源码
