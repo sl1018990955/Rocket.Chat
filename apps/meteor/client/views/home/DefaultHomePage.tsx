@@ -25,28 +25,32 @@ const DefaultHomePage = (): ReactElement => {
 	const isCustomContentVisible = useSetting('Layout_Home_Custom_Block_Visible', false);
 
 	return (
-		<Page color='default' data-qa='page-home' data-qa-type='default' background='tint'>
-			<HomePageHeader />
-			<PageScrollableContent>
-				<Box is='h2' fontScale='h1' mb={20} data-qa-id='homepage-welcome-text'>
-					{t('Welcome_to_workspace', { Site_Name: workspaceName || 'Rocket.Chat' })}
-				</Box>
-				<Box is='h3' fontScale='h3' mb={16}>
-					{t('Some_ideas_to_get_you_started')}
-				</Box>
-				<Box mi='neg-x8'>
-					<CardGroup wrap stretch>
-						{canAddUsers && <AddUsersCard />}
-						{canCreateChannel && <CreateChannelsCard />}
-						<JoinRoomsCard />
-						<MobileAppsCard />
-						<DesktopAppsCard />
-						<DocumentationCard />
-						{(isAdmin || (isCustomContentVisible && !isCustomContentBodyEmpty)) && <CustomContentCard />}
-					</CardGroup>
-				</Box>
-			</PageScrollableContent>
-		</Page>
+		<>
+			<Page color='default' data-qa='page-home' data-qa-type='default' background='tint'>
+				<HomePageHeader />
+				<PageScrollableContent>
+					<Box is='h2' fontScale='h1' mb={20} data-qa-id='homepage-welcome-text'>
+						{t('Welcome_to_workspace', { Site_Name: workspaceName || 'Rocket.Chat' })}
+					</Box>
+					<Box is='h3' fontScale='h3' mb={16}>
+						{t('Some_ideas_to_get_you_started')}
+					</Box>
+					<Box mi='neg-x8'>
+						<CardGroup wrap stretch>
+							{canAddUsers && <AddUsersCard />}
+							{canCreateChannel && <CreateChannelsCard />}
+							<JoinRoomsCard />
+							<MobileAppsCard />
+							<DesktopAppsCard />
+							<DocumentationCard />
+							{(isAdmin || (isCustomContentVisible && !isCustomContentBodyEmpty)) && <CustomContentCard />}
+						</CardGroup>
+					</Box>
+				</PageScrollableContent>
+			</Page>
+			
+
+		</>
 	);
 };
 
