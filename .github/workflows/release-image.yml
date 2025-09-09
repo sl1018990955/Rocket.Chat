@@ -1,133 +1,173 @@
-name: Build and Push Docker Image
+name: Build and Release Docker Image
 
-# 触发条件：推送版本标签时自动执行
 on:
   push:
     tags:
-      - 'v*.*.*-*-r*'  # 匹配格式：v6.7.3-custA-r1
-  workflow_dispatch:  # 允许手动触发
-    inputs:
-      tag:
-        description: 'Docker image tag'
-        required: true
-        default: 'latest'
+      - 'v*.*.*-htchat-r*'
+  workflow_dispatch:
+
+# ✅ 建议在 workflow 级别给足权限（或放到每个需要 push 的 job 上）
+permissions:
+  contents: read
+  packages: write
+  id-token: write
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_NAME: rocketchat-custom
+  IMAGE_OWNER: ${{ github.repository_owner }}        # eg. sl1018990955
+  IMAGE_NAME: rocketchat-custom                      # 建议两段式 owner/image
 
 jobs:
-  build-and-push:
-    name: 🚢 Build and Push Docker Image
+  release-versions:
     runs-on: ubuntu-24.04
-    
+    outputs:
+      node-version: ${{ steps.versions.outputs.node-version }}
+      deno-version: ${{ steps.versions.outputs.deno-version }}
+      gh-docker-tag: ${{ steps.versions.outputs.gh-docker-tag }}
+      rc-dockerfile: ${{ steps.versions.outputs.rc-dockerfile }}
+      rc-docker-tag: ${{ steps.versions.outputs.rc-docker-tag }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: versions
+        run: |
+          echo "node-version=22.16.0" >> $GITHUB_OUTPUT
+          echo "deno-version=1.46.3" >> $GITHUB_OUTPUT
+          echo "gh-docker-tag=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+          echo "rc-dockerfile=apps/meteor/.docker/Dockerfile.alpine" >> $GITHUB_OUTPUT
+          echo "rc-docker-tag=${GITHUB_REF#refs/tags/}.alpine" >> $GITHUB_OUTPUT
+
+  packages-build:
+    needs: [release-versions]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: pierotofy/set-swap-space@master
+        with: { swap-size-gb: 4 }
+      - uses: actions/checkout@v4
+      - name: Setup NodeJS
+        uses: ./.github/actions/setup-node
+        with:
+          node-version: ${{ needs.release-versions.outputs.node-version }}
+          deno-version: ${{ needs.release-versions.outputs.deno-version }}
+          cache-modules: true
+          install: true
+      - uses: actions/cache@v4
+        with:
+          path: ./node_modules/.vite
+          key: vite-local-cache-${{ runner.OS }}-${{ hashFiles('package.json') }}
+          restore-keys: vite-local-cache-${{ runner.os }}-
+      - uses: rharkor/caching-for-turbo@v1.8
+      - name: Build Rocket.Chat Packages
+        run: yarn build
+      - uses: actions/upload-artifact@v4
+        with:
+          name: turbo-build
+          path: .turbo/cache
+          overwrite: true
+          include-hidden-files: true
+
+  build-prod:
+    needs: [release-versions, packages-build]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/meteor-build
+        with:
+          node-version: ${{ needs.release-versions.outputs.node-version }}
+          deno-version: ${{ needs.release-versions.outputs.deno-version }}
+          coverage: false
+      # ⬆️ 确保这个 action 最终上传了 artifact:
+      # name: build  内含文件 Rocket.Chat.tar.gz（官方流水线风格）
+
+  build-matrix-rust-bindings-for-alpine:
+    runs-on: ubuntu-24.04
+    steps:
+      - id: matrix-rust-sdk-crypto-nodejs
+        uses: actions/cache@v4
+        with:
+          path: /tmp/build/matrix-sdk-crypto.linux-x64-musl.node
+          key: matrix-rust-sdk-crypto-nodejs-v0.2.0-beta.1
+      - uses: actions/checkout@v4
+        with:
+          repository: matrix-org/matrix-rust-sdk-crypto-nodejs
+          ref: v0.2.0-beta.1
+      - if: steps.matrix-rust-sdk-crypto-nodejs.outputs.cache-hit != 'true'
+        run: sudo apt-get install -y musl-tools libunwind-dev || true
+      - if: steps.matrix-rust-sdk-crypto-nodejs.outputs.cache-hit != 'true'
+        uses: actions/setup-node@v4
+        with: { node-version: 22.16.0 }
+      - if: steps.matrix-rust-sdk-crypto-nodejs.outputs.cache-hit != 'true'
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with: { toolchain: '1.76', target: x86_64-unknown-linux-musl }
+      - if: steps.matrix-rust-sdk-crypto-nodejs.outputs.cache-hit != 'true'
+        uses: mlugg/setup-zig@v1
+        with: { version: 0.13.0 }
+      - if: steps.matrix-rust-sdk-crypto-nodejs.outputs.cache-hit != 'true'
+        run: |
+          npm install --ignore-scripts
+          npx napi build --release --target x86_64-unknown-linux-musl --platform --zig
+          mkdir -p /tmp/build
+          mv matrix-sdk-crypto.linux-x64-musl.node /tmp/build/matrix-sdk-crypto.linux-x64-musl.node
+
+  build-gh-docker:
+    needs: [build-prod, release-versions, build-matrix-rust-bindings-for-alpine]
+    runs-on: ubuntu-24.04
+    # ✅ 若未在 workflow 级别设权限，可在此 job 再设一次
     permissions:
       contents: read
       packages: write
-      
+      id-token: write
+    env:
+      RC_DOCKERFILE: ${{ needs.release-versions.outputs.rc-dockerfile }}
+      RC_DOCKER_TAG: ${{ needs.release-versions.outputs.rc-docker-tag }}
+      DOCKER_TAG:    ${{ needs.release-versions.outputs.gh-docker-tag }}
     steps:
-      - name: 📥 Checkout repository
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-          
-      - name: 🔧 Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-        
-      - name: 🔑 Log in to Container Registry
+      - uses: actions/checkout@v4
+
+      - name: Login to GHCR
         uses: docker/login-action@v3
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-          
-      - name: 🏷️ Extract metadata
-        id: meta
-        uses: docker/metadata-action@v5
+
+      - name: Restore build artifact
+        uses: actions/download-artifact@v4
         with:
-          images: ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}
-          tags: |
-            type=ref,event=tag
-            type=raw,value=latest,enable={{is_default_branch}}
-            type=raw,value={{tag}},enable=${{ github.event_name == 'workflow_dispatch' }}
-          labels: |
-            org.opencontainers.image.title=Rocket.Chat Custom
-            org.opencontainers.image.description=Rocket.Chat with HT.Chat branding
-            org.opencontainers.image.vendor=HT.Chat
-            
-      - name: 🔍 Get version info
-        id: version
+          name: build              # ⬅️ 和 meteor-build 保持一致
+          path: /tmp/build
+
+      - name: Unpack bundle
         run: |
-          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
-            echo "version=${{ github.event.inputs.tag }}" >> $GITHUB_OUTPUT
-            echo "is_release=false" >> $GITHUB_OUTPUT
-          else
-            VERSION=${GITHUB_REF#refs/tags/}
-            echo "version=${VERSION}" >> $GITHUB_OUTPUT
-            echo "is_release=true" >> $GITHUB_OUTPUT
-          fi
-          
-          # 获取提交信息
-          COMMIT_SHA=$(git rev-parse --short HEAD)
-          echo "commit_sha=${COMMIT_SHA}" >> $GITHUB_OUTPUT
-          
-          # 获取构建时间
-          BUILD_DATE=$(date -u +'%Y-%m-%dT%H:%M:%SZ')
-          echo "build_date=${BUILD_DATE}" >> $GITHUB_OUTPUT
-          
-      - name: 🏗️ Build and push Docker image
-        uses: docker/build-push-action@v5
+          cd /tmp/build
+          ls -al
+          tar xzf Rocket.Chat.tar.gz
+          rm Rocket.Chat.tar.gz
+          test -d bundle && echo "bundle found"
+
+      - name: Restore matrix bindings cache
+        uses: actions/cache@v4
         with:
-          context: .
-          file: ./Dockerfile
-          platforms: linux/amd64
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: |
-            ${{ steps.meta.outputs.labels }}
-            org.opencontainers.image.version=${{ steps.version.outputs.version }}
-            org.opencontainers.image.revision=${{ steps.version.outputs.commit_sha }}
-            org.opencontainers.image.created=${{ steps.version.outputs.build_date }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-          build-args: |
-            BUILDKIT_INLINE_CACHE=1
-            
-      - name: 📋 Generate build summary
+          path: /tmp/build/matrix-sdk-crypto.linux-x64-musl.node
+          key: matrix-rust-sdk-crypto-nodejs-v0.2.0-beta.1
+
+      - name: Build image (amd64)
         run: |
-          echo "## 🚀 Docker Image Build Summary" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### 📦 Image Information" >> $GITHUB_STEP_SUMMARY
-          echo "- **Repository**: ${{ github.repository }}" >> $GITHUB_STEP_SUMMARY
-          echo "- **Version**: ${{ steps.version.outputs.version }}" >> $GITHUB_STEP_SUMMARY
-          echo "- **Commit**: ${{ steps.version.outputs.commit_sha }}" >> $GITHUB_STEP_SUMMARY
-          echo "- **Build Date**: ${{ steps.version.outputs.build_date }}" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### 🏷️ Published Tags" >> $GITHUB_STEP_SUMMARY
-          echo '```' >> $GITHUB_STEP_SUMMARY
-          echo '${{ steps.meta.outputs.tags }}' >> $GITHUB_STEP_SUMMARY
-          echo '```' >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### 🐳 Pull Command" >> $GITHUB_STEP_SUMMARY
-          echo '```bash' >> $GITHUB_STEP_SUMMARY
-          echo "docker pull ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}:${{ steps.version.outputs.version }}" >> $GITHUB_STEP_SUMMARY
-          echo '```' >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### 📝 Usage Example" >> $GITHUB_STEP_SUMMARY
-          echo '```yaml' >> $GITHUB_STEP_SUMMARY
-          echo "version: '3.8'" >> $GITHUB_STEP_SUMMARY
-          echo "services:" >> $GITHUB_STEP_SUMMARY
-          echo "  rocketchat:" >> $GITHUB_STEP_SUMMARY
-          echo "    image: ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}:${{ steps.version.outputs.version }}" >> $GITHUB_STEP_SUMMARY
-          echo "    ports:" >> $GITHUB_STEP_SUMMARY
-          echo "      - \"3000:3000\"" >> $GITHUB_STEP_SUMMARY
-          echo "    environment:" >> $GITHUB_STEP_SUMMARY
-          echo "      - MONGO_URL=mongodb://mongo:27017/rocketchat" >> $GITHUB_STEP_SUMMARY
-          echo "      - ROOT_URL=http://localhost:3000" >> $GITHUB_STEP_SUMMARY
-          echo '```' >> $GITHUB_STEP_SUMMARY
-          
-      - name: 🎉 Build completed
+          cd /tmp/build
+          docker build \
+            --platform linux/amd64 \
+            -f ${{ github.workspace }}/${{ env.RC_DOCKERFILE }} \
+            --build-arg DENO_VERSION=${{ needs.release-versions.outputs.deno-version }} \
+            -t ${{ env.REGISTRY }}/${{ github.repository_owner }}/$IMAGE_NAME:${{ env.DOCKER_TAG }} \
+            .
+
+      - name: Push tag
         run: |
-          echo "✅ Docker image successfully built and pushed!"
-          echo "📦 Image: ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}:${{ steps.version.outputs.version }}"
-          echo "🔗 Registry: https://github.com/${{ github.repository_owner }}/packages/container/${{ env.IMAGE_NAME }}"
+          docker push ${{ env.REGISTRY }}/${{ github.repository_owner }}/$IMAGE_NAME:${{ env.DOCKER_TAG }}
+
+      # 可选：只在满足你的命名约定时附送 latest（不建议生产用 latest）
+      - name: Tag & push latest (optional)
+        if: contains(github.ref, 'htchat-r')
+        run: |
+          docker tag  ${{ env.REGISTRY }}/${{ github.repository_owner }}/$IMAGE_NAME:${{ env.DOCKER_TAG }} \
+                      ${{ env.REGISTRY }}/${{ github.repository_owner }}/$IMAGE_NAME:latest
+          docker push ${{ env.REGISTRY }}/${{ github.repository_owner }}/$IMAGE_NAME:latest

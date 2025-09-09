@@ -1,95 +1,76 @@
-# Build stage
-FROM node:22.16.0-alpine AS builder
-
-LABEL maintainer="buildmaster@rocket.chat"
+# ---------- Stage 1: Build bundle on Debian (更稳) ----------
+FROM node:22-bullseye AS builder
 
 ENV LANG=C.UTF-8
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    git ca-certificates curl python3 build-essential \
+ && rm -rf /var/lib/apt/lists/*
 
-# Install build dependencies
-RUN apk add --no-cache deno ttf-dejavu python3 make g++ py3-setuptools libc6-compat curl
+# 安装 Meteor（允许 root）
+RUN curl https://install.meteor.com/ | sed s/--progress-bar/-sL/g | sh
+ENV PATH="/root/.meteor:${PATH}"
 
-# Install Meteor
-RUN curl https://install.meteor.com/ | sh
-ENV PATH="$PATH:/root/.meteor"
+WORKDIR /src
 
-# Copy source code
-COPY . /app
-WORKDIR /app
+# 先装依赖（利用缓存）
+COPY package.json yarn.lock ./
+COPY packages ./packages
+RUN corepack enable && yarn install --frozen-lockfile
 
-# Install dependencies and build
-RUN yarn install
-RUN yarn build:ci
+# 拷贝剩余源码
+COPY . .
 
-# Runtime stage
-FROM node:22.16.0-alpine
+# monorepo 预构建（等价于你之前的 build:ci）
+RUN yarn build
 
-LABEL maintainer="buildmaster@rocket.chat"
+# 打 Meteor 服务器 bundle
+WORKDIR /src/apps/meteor
+RUN meteor npm ci
+RUN meteor build --server-only --directory /opt/rc-bundle --allow-superuser
 
-ENV LANG=C.UTF-8
+# ---------- Stage 2: Runtime on Alpine ----------
+FROM node:22.16.0-alpine AS runtime
 
-# `nogroup` group is historically reserved for NFS.
-# We don't use any NFS related tools in this image.
-# For the same reason of NFS using the gid, we can also use it as long as there are no conflicts in terms of running processes with the same egid (which is 1 in our case).
-# While 65533 raw gid could be used, renaming nogroup to rocketchat here for maximum compatibility with older debian image.
-# More info on nobody/nogroup - https://wiki.ubuntu.com/nobody
-# Debian wiki - https://wiki.debian.org/SystemGroups
-# """
-# daemon: Some unprivileged daemons that need to write to files on disk run as daemon.daemon (e.g., portmap, atd, probably others).
-# Daemons that don't need to own any files can run as nobody.nogroup instead,
-# and more complex or security conscious daemons run as dedicated users.
-# The daemon user is also handy for locally installed daemons.
-# """
-RUN apk add --no-cache deno ttf-dejavu \
-    && apk add --no-cache --virtual deps shadow python3 make g++ py3-setuptools libc6-compat \
-    && groupmod -n rocketchat nogroup \
-    && useradd -u 65533 -r -g rocketchat rocketchat
-
-# Copy built application from builder stage
-COPY --from=builder --chown=rocketchat:rocketchat /tmp/dist/bundle /app/bundle
-
-# needs a mongo instance - defaults to container linking with alias 'mongo'
-ENV DEPLOY_METHOD=docker \
+ENV LANG=C.UTF-8 \
     NODE_ENV=production \
-    MONGO_URL=mongodb://mongo:27017/rocketchat \
-    HOME=/tmp \
+    DEPLOY_METHOD=docker \
     PORT=3000 \
     ROOT_URL=http://localhost:3000 \
+    MONGO_URL=mongodb://mongo:27017/rocketchat \
     Accounts_AvatarStorePath=/app/uploads
 
+# 仅运行期必需的包
+RUN apk add --no-cache tini tzdata openssl libc6-compat
+
+# 创建非 root 用户（用 busybox 自带 addgroup/adduser 更简单）
+RUN addgroup -g 65533 -S rocketchat \
+ && adduser -u 65533 -S -D -G rocketchat rocketchat
+
+WORKDIR /app
+
+# 从 builder 拷贝 bundle
+COPY --from=builder --chown=rocketchat:rocketchat /opt/rc-bundle/bundle /app/bundle
+
+# 安装 server 端依赖（musl 环境）
+WORKDIR /app/bundle/programs/server
+# 若需强制用 musl 预编译，可加环境开关；否则走源码编译
+RUN npm ci --omit=dev \
+ && npm rebuild bcrypt --build-from-source \
+ # sharp 在 musl 上常见，单独装并放回 npm 层级（你的原 hack 保留）
+ && rm -rf npm/node_modules/sharp \
+ && npm install sharp@0.32.6 --no-save \
+ && mv node_modules/sharp npm/node_modules/sharp \
+ && npm cache clean --force
+
+# （可选）如果你有提前构建好的 matrix musl .node，可在这里 COPY 进去：
+# COPY matrix-sdk-crypto.linux-x64-musl.node \
+#   /app/bundle/programs/server/npm/node_modules/@matrix-org/matrix-sdk-crypto-nodejs/prebuilds/linux-x64/musl/matrix-sdk-crypto.linux-x64-musl.node
+
 USER rocketchat
-
-RUN cd /app/bundle/programs/server \
-    && npm install --omit=dev \
-    && cd /app/bundle/programs/server \
-    && rm -rf npm/node_modules/sharp \
-    && npm install sharp@0.32.6 --no-save \
-    && mv node_modules/sharp npm/node_modules/sharp \
-    # End hack for sharp
-    && cd /app/bundle/programs/server/npm/node_modules/@vector-im/matrix-bot-sdk \
-    && npm install \
-    # # Start hack for isolated-vm...
-    # && rm -rf npm/node_modules/isolated-vm \
-    # && npm install isolated-vm@4.6.0 \
-    # && mv node_modules/isolated-vm npm/node_modules/isolated-vm \
-    # # End hack for isolated-vm
-    && cd /app/bundle/programs/server/npm \
-    && npm rebuild bcrypt --build-from-source \
-    && npm cache clear --force
-
-USER root
-
-RUN apk del deps
-
-USER rocketchat
-
-# TODO: remove hack once upstream builds are fixed
-# The matrix-sdk-crypto.linux-x64-musl.node file should be provided by the npm package installation
-# If it's missing, we'll skip copying it and let the application handle the fallback
-
-VOLUME /app/uploads
-
 WORKDIR /app/bundle
 
+VOLUME /app/uploads
 EXPOSE 3000
 
-CMD ["node", "main.js"]
+ENTRYPOINT ["/sbin/tini","--"]
+CMD ["node","main.js"]
