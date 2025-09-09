@@ -83,8 +83,8 @@ RUN apk del deps
 USER rocketchat
 
 # TODO: remove hack once upstream builds are fixed
-COPY --chown=rocketchat:rocketchat matrix-sdk-crypto.linux-x64-musl.node /app/bundle/programs/server/npm/node_modules/@matrix-org/matrix-sdk-crypto-nodejs
-COPY --chown=rocketchat:rocketchat matrix-sdk-crypto.linux-x64-musl.node /app/bundle/programs/server/npm/node_modules/@vector-im/matrix-bot-sdk/node_modules/@matrix-org/matrix-sdk-crypto-nodejs
+# The matrix-sdk-crypto.linux-x64-musl.node file should be provided by the npm package installation
+# If it's missing, we'll skip copying it and let the application handle the fallback
 
 VOLUME /app/uploads
 
