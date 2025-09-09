@@ -11,26 +11,22 @@ RUN apk add --no-cache \
     python3 \
     make \
     g++ \
-    py3-setuptools \
     git \
-    shadow \
     libc6-compat
 
 WORKDIR /app
 
-# Copy package files for dependency installation
+# Copy package files first for better caching
 COPY package.json yarn.lock .yarnrc.yml ./
 COPY .yarn/ .yarn/
-
-# Copy all packages and apps
-COPY packages/ packages/
-COPY apps/ apps/
-COPY ee/ ee/
 
 # Install dependencies
 RUN yarn install --immutable
 
-# Build packages
+# Copy source code
+COPY . .
+
+# Build the application
 RUN yarn build
 
 # Build meteor application
@@ -47,18 +43,13 @@ ENV LANG=C.UTF-8
 
 # Install runtime dependencies
 RUN apk add --no-cache \
-    deno \
-    ttf-dejavu \
-    shadow \
-    python3 \
-    make \
-    g++ \
-    py3-setuptools \
-    libc6-compat
+    dumb-init \
+    fontconfig \
+    ttf-dejavu
 
-# Create rocketchat user and group
-RUN groupmod -n rocketchat nogroup \
-    && useradd -u 65533 -r -g rocketchat rocketchat
+# Create rocketchat user
+RUN addgroup -g 65533 -S rocketchat && \
+    adduser -u 65533 -S -G rocketchat rocketchat
 
 # Copy built application from builder stage
 COPY --from=builder --chown=rocketchat:rocketchat /app/apps/meteor/.meteor/local/build /app/bundle
@@ -74,27 +65,15 @@ ENV DEPLOY_METHOD=docker \
 
 USER rocketchat
 
-# Install production dependencies and rebuild native modules
-RUN cd /app/bundle/programs/server \
-    && npm install --omit=dev \
-    && rm -rf npm/node_modules/sharp \
-    && npm install sharp@0.32.6 --no-save \
-    && mv node_modules/sharp npm/node_modules/sharp \
-    && cd npm/node_modules/@vector-im/matrix-bot-sdk \
-    && npm install \
-    && cd /app/bundle/programs/server/npm \
-    && npm rebuild bcrypt --build-from-source \
-    && npm cache clear --force
+# Install production dependencies
+RUN cd /app/bundle/programs/server && \
+    npm install --omit=dev && \
+    npm cache clean --force
 
-# Switch back to root to clean up build dependencies
-USER root
-RUN apk del python3 make g++ py3-setuptools
+# Create uploads directory
+RUN mkdir -p /app/uploads
 
-# Switch back to rocketchat user
-USER rocketchat
-
-# Create uploads volume
-VOLUME /app/uploads
+VOLUME ["/app/uploads"]
 
 WORKDIR /app/bundle
 
@@ -102,6 +81,7 @@ EXPOSE 3000
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
-    CMD wget --no-verbose --tries=1 --spider http://localhost:3000/api/info || exit 1
+    CMD node -e "require('http').get('http://localhost:3000/api/info', (res) => process.exit(res.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))"
 
+ENTRYPOINT ["dumb-init", "--"]
 CMD ["node", "main.js"]
