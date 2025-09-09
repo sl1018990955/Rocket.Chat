@@ -28,11 +28,6 @@ USER rocketchat
 # Install and build dependencies
 RUN cd /app/bundle/programs/server \
     && npm install --omit=dev \
-    && rm -rf npm/node_modules/sharp \
-    && npm install sharp@0.32.6 --no-save \
-    && mv node_modules/sharp npm/node_modules/sharp \
-    && cd /app/bundle/programs/server/npm/node_modules/@vector-im/matrix-bot-sdk \
-    && npm install \
     && cd /app/bundle/programs/server/npm \
     && npm rebuild bcrypt --build-from-source \
     && npm cache clear --force
