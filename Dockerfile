@@ -44,9 +44,8 @@ RUN apk del .build-deps
 # Switch back to rocketchat user
 USER rocketchat
 
-# Copy matrix SDK files (TODO: remove hack once upstream builds are fixed)
-COPY --chown=rocketchat:rocketchat matrix-sdk-crypto.linux-x64-musl.node /app/bundle/programs/server/npm/node_modules/@matrix-org/matrix-sdk-crypto-nodejs
-COPY --chown=rocketchat:rocketchat matrix-sdk-crypto.linux-x64-musl.node /app/bundle/programs/server/npm/node_modules/@vector-im/matrix-bot-sdk/node_modules/@matrix-org/matrix-sdk-crypto-nodejs
+# Matrix SDK files are not available in this build context
+# TODO: Add matrix SDK files if needed for matrix functionality
 
 # Create volume for uploads
 VOLUME /app/uploads
