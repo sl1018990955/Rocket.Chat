@@ -43,8 +43,11 @@ ENV LANG=C.UTF-8 \
 RUN apk add --no-cache tini tzdata openssl libc6-compat
 
 # 创建非 root 用户（用 busybox 自带 addgroup/adduser 更简单）
-RUN addgroup -g 65533 -S rocketchat \
- && adduser -u 65533 -S -D -G rocketchat rocketchat
+# 不固定 GID，避免冲突；可选：固定 UID（常见为 65533），若担心也可不固定
+RUN addgroup -S rocketchat \
+ && adduser -S -D -G rocketchat -u 65533 -H -s /sbin/nologin rocketchat || \
+    (deluser rocketchat 2>/dev/null || true && adduser -S -D -G rocketchat -H -s /sbin/nologin rocketchat)
+
 
 WORKDIR /app
 
