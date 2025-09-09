@@ -1,6 +1,6 @@
 # Multi-stage Dockerfile for Rocket.Chat Custom Build
 # Stage 1: Build stage
-FROM node:22-alpine AS builder
+FROM node:22.16.0-alpine AS builder
 
 LABEL maintainer="admin888@example.com"
 
@@ -28,7 +28,7 @@ COPY apps/ apps/
 COPY ee/ ee/
 
 # Install dependencies
-RUN yarn install --frozen-lockfile
+RUN yarn install --immutable
 
 # Build packages
 RUN yarn build
@@ -38,7 +38,7 @@ WORKDIR /app/apps/meteor
 RUN yarn build
 
 # Stage 2: Runtime stage
-FROM node:22-alpine
+FROM node:22.16.0-alpine
 
 LABEL maintainer="admin888@example.com"
 LABEL description="Rocket.Chat Custom Build with HT.Chat branding"
