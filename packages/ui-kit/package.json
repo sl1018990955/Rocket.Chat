@@ -26,7 +26,7 @@
 	},
 	"scripts": {
 		"build": "run-s .:build:prepare .:build:clean .:build:esm .:build:cjs",
-		".:build:prepare": "ts-patch install && typia patch",
+		".:build:prepare": "ts-patch install && yarn typia patch",
 		".:build:clean": "rimraf dist",
 		".:build:esm": "tsc -p tsconfig.esm.json",
 		".:build:cjs": "tsc -p tsconfig.cjs.json",
