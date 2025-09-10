@@ -38,7 +38,7 @@ RUN yarn build
 
 # 打 Meteor 服务器 bundle
 WORKDIR /src/apps/meteor
-RUN meteor npm ci
+RUN meteor npm ci --allow-superuser
 RUN meteor build --server-only --directory /opt/rc-bundle --allow-superuser
 
 # ---------- Stage 2: Runtime on Alpine ----------
