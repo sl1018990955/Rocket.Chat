@@ -1,5 +1,5 @@
 # ---------- Stage 1: Build bundle on Debian (更稳) ----------
-FROM node:22-bullseye AS builder
+FROM node:22.16.0-bullseye AS builder
 
 ENV LANG=C.UTF-8
 RUN apt-get update && apt-get install -y --no-install-recommends \
