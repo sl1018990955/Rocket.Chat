@@ -11,6 +11,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
 ENV PATH="/root/.cargo/bin:${PATH}"
 
+# Install Deno for apps-engine
+RUN curl -fsSL https://deno.land/install.sh | sh
+ENV PATH="/root/.deno/bin:${PATH}"
+
 # 安装 Meteor（允许 root，增加重试机制）
 RUN for i in 1 2 3; do \
         curl -fsSL https://install.meteor.com/ | sed s/--progress-bar/-sL/g | sh && break || \
