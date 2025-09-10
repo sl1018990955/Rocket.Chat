@@ -33,6 +33,9 @@ RUN corepack enable && \
 # 拷贝剩余源码
 COPY . .
 
+# 确保 ts-patch 和 typia 正确安装
+RUN cd packages/ui-kit && yarn run .:build:prepare
+
 # monorepo 预构建（等价于你之前的 build:ci）
 RUN yarn build
 
