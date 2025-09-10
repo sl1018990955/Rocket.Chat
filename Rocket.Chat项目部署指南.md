@@ -47,11 +47,11 @@
 ## 部署架构
 
 ### 开发流程
-1. **本地开发**：在 WSL 环境中修改源码
-2. **热更新调试**：通过 `yarn dev` 实时验证修改效果
-3. **代码提交**：将修改推送到 GitHub 仓库
-4. **镜像构建**：通过 GitHub Actions 自动构建 Docker 镜像
-5. **生产部署**：客户通过 Docker Compose 更新镜像
+1. 本地开发：在 WSL 环境中修改源码
+2. 热更新调试：通过 `yarn dev` 实时验证修改效果
+3. 代码提交：将修改推送到 GitHub 仓库
+4. 镜像构建：通过 GitHub Actions 自动构建 Docker 镜像
+5. 生产部署：客户通过 Docker Compose 更新镜像
 
 ### 镜像发布流程
 1. 将代码修改合并到 `main` 分支
@@ -69,6 +69,7 @@
   - `Default_Home_Page_Get_Started`: "立即开始"
 - **构建状态**: i18n 包已重新构建
 - **相关文档**: 已创建《Rocket.Chat中文翻译添加指南.md》
+
 
 ### Docker 配置
 - **Dockerfile**：多阶段构建配置（构建 → 运行镜像）
