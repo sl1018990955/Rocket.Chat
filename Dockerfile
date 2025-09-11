@@ -31,9 +31,22 @@ COPY packages ./packages
 COPY ee ./ee
 COPY apps ./apps
 # 安装依赖（配置已在.yarnrc.yml中设置）
+# 优化磁盘使用：清理缓存、减少并发、启用压缩
 RUN corepack enable && \
-    yarn install --mode=skip-build && \
-    yarn cache clean --all
+    # 设置yarn配置以减少磁盘使用
+    yarn config set enableGlobalCache false && \
+    yarn config set compressionLevel 9 && \
+    yarn config set networkConcurrency 8 && \
+    # 安装依赖并立即清理
+    yarn install --mode=skip-build --inline-builds && \
+    # 清理yarn缓存和临时文件
+    yarn cache clean --all && \
+    # 清理node_modules中的不必要文件
+    find . -name "*.map" -type f -delete 2>/dev/null || true && \
+    find . -name "*.d.ts.map" -type f -delete 2>/dev/null || true && \
+    find . -path "*/node_modules/*/.cache" -type d -exec rm -rf {} + 2>/dev/null || true && \
+    find . -path "*/node_modules/*/test*" -type d -exec rm -rf {} + 2>/dev/null || true && \
+    find . -path "*/node_modules/*/docs" -type d -exec rm -rf {} + 2>/dev/null || true
 
 # 拷贝剩余源码
 COPY . .
@@ -43,7 +56,16 @@ RUN cd packages/ui-kit && yarn run .:build:prepare
 
 # monorepo 预构建（等价于你之前的 build:ci）
 RUN yarn build && \
-    yarn cache clean --all
+    # 立即清理构建缓存和临时文件
+    yarn cache clean --all && \
+    # 清理构建过程中产生的临时文件
+    find . -name "*.tsbuildinfo" -type f -delete 2>/dev/null || true && \
+    find . -name ".turbo" -type d -exec rm -rf {} + 2>/dev/null || true && \
+    find . -path "*/dist/*.map" -type f -delete 2>/dev/null || true && \
+    find . -path "*/build/*.map" -type f -delete 2>/dev/null || true && \
+    # 清理开发依赖和测试文件
+    find . -path "*/node_modules/*/__tests__" -type d -exec rm -rf {} + 2>/dev/null || true && \
+    find . -path "*/node_modules/*/spec" -type d -exec rm -rf {} + 2>/dev/null || true
 
 # 打 Meteor 服务器 bundle
 WORKDIR /src/apps/meteor
