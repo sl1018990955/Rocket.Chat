@@ -128,7 +128,8 @@ ENV PYTHON=/usr/bin/python3 \
     CXX=g++ \
     CC=gcc
 # 若需强制用 musl 预编译，可加环境开关；否则走源码编译
-RUN npm ci --omit=dev \
+# 使用 npm install 而不是 npm ci，因为 bundle 中可能没有 package-lock.json
+RUN npm install --omit=dev --no-package-lock \
  && npm rebuild bcrypt --build-from-source \
  # sharp 在 musl 上常见，单独装并放回 npm 层级（你的原 hack 保留）
  && rm -rf npm/node_modules/sharp \
