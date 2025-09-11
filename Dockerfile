@@ -51,7 +51,17 @@ RUN yarn install && \
     yarn cache clean --all
 RUN meteor build --server-only --directory /opt/rc-bundle --allow-superuser && \
     rm -rf /src/apps/meteor/node_modules && \
-    rm -rf /tmp/*
+    rm -rf /tmp/* && \
+    cd /opt/rc-bundle/bundle && \
+    find . -name "*.map" -delete && \
+    find . -name "*.ts" -delete && \
+    find . -name "*.coffee" -delete && \
+    rm -rf programs/web.browser/dynamic/node_modules/*/test* && \
+    rm -rf programs/web.browser/dynamic/node_modules/*/docs && \
+    rm -rf programs/web.browser/dynamic/node_modules/*/examples && \
+    rm -rf programs/web.browser.legacy/dynamic/node_modules/*/test* && \
+    rm -rf programs/web.browser.legacy/dynamic/node_modules/*/docs && \
+    rm -rf programs/web.browser.legacy/dynamic/node_modules/*/examples
 
 # ---------- Stage 2: Runtime on Alpine ----------
 FROM node:22.16.0-alpine AS runtime
