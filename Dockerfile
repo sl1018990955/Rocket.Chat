@@ -47,6 +47,17 @@ RUN yarn build && \
 
 # 打 Meteor 服务器 bundle
 WORKDIR /src/apps/meteor
+
+# 安装额外的原生模块编译依赖
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    python3-dev python3-setuptools node-gyp \
+ && rm -rf /var/lib/apt/lists/*
+
+# 设置编译环境变量
+ENV PYTHON=/usr/bin/python3
+ENV CXX=g++
+ENV CC=gcc
+
 RUN yarn install && \
     yarn cache clean --all
 RUN meteor build --server-only --directory /opt/rc-bundle --allow-superuser && \
