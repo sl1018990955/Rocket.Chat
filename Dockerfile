@@ -82,8 +82,10 @@ ENV LANG=C.UTF-8 \
     MONGO_URL=mongodb://mongo:27017/rocketchat \
     Accounts_AvatarStorePath=/app/uploads
 
-# 仅运行期必需的包
-RUN apk add --no-cache tini tzdata openssl libc6-compat
+# 仅运行期必需的包，添加编译工具用于原生模块
+RUN apk add --no-cache tini tzdata openssl libc6-compat \
+    python3 python3-dev build-base make g++ \
+    && ln -sf python3 /usr/bin/python
 
 # 创建非 root 用户（用 busybox 自带 addgroup/adduser 更简单）
 # 不固定 GID，避免冲突；可选：固定 UID（常见为 65533），若担心也可不固定
@@ -99,6 +101,10 @@ COPY --from=builder --chown=rocketchat:rocketchat /opt/rc-bundle/bundle /app/bun
 
 # 安装 server 端依赖（musl 环境）
 WORKDIR /app/bundle/programs/server
+# 设置编译环境变量
+ENV PYTHON=/usr/bin/python3 \
+    CXX=g++ \
+    CC=gcc
 # 若需强制用 musl 预编译，可加环境开关；否则走源码编译
 RUN npm ci --omit=dev \
  && npm rebuild bcrypt --build-from-source \
