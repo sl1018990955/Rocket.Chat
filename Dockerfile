@@ -32,7 +32,8 @@ COPY ee ./ee
 COPY apps ./apps
 # 安装依赖（配置已在.yarnrc.yml中设置）
 RUN corepack enable && \
-    yarn install --mode=skip-build
+    yarn install --mode=skip-build && \
+    yarn cache clean --all
 
 # 拷贝剩余源码
 COPY . .
@@ -41,12 +42,16 @@ COPY . .
 RUN cd packages/ui-kit && yarn run .:build:prepare
 
 # monorepo 预构建（等价于你之前的 build:ci）
-RUN yarn build
+RUN yarn build && \
+    yarn cache clean --all
 
 # 打 Meteor 服务器 bundle
 WORKDIR /src/apps/meteor
-RUN yarn install
-RUN meteor build --server-only --directory /opt/rc-bundle --allow-superuser
+RUN yarn install && \
+    yarn cache clean --all
+RUN meteor build --server-only --directory /opt/rc-bundle --allow-superuser && \
+    rm -rf /src/apps/meteor/node_modules && \
+    rm -rf /tmp/*
 
 # ---------- Stage 2: Runtime on Alpine ----------
 FROM node:22.16.0-alpine AS runtime
